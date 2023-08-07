@@ -691,7 +691,9 @@ static bool isEligibleFunction(Function *F) {
 }
 
 bool SwiftMergeFunctions::runOnModule(Module &M) {
-  
+  // FunctionMergeThreshold变量是一个用于控制函数合并的阈值。
+  // 如果两个函数的大小之和小于或等于`FunctionMergeThreshold`，
+  // 则这两个函数可以被合并成一个函数。此变量的默认值为`6`。
   if (FunctionMergeThreshold == 0)
     return false;
 
@@ -714,6 +716,11 @@ bool SwiftMergeFunctions::runOnModule(Module &M) {
     HashedFuncs;
 
   for (Function &Func : M) {
+    // isEligibleFunction函数用于判断一个函数是否符合被合并的条件。如果该函数满足以下条件，则该函数被视为合并候选函数：
+    // 该函数不是声明，而是定义。
+    // 该函数没有被标记为noinline。
+    // 该函数没有被标记为optnone。
+    // 该函数的大小小于或等于FunctionMergeThreshold。
     if (isEligibleFunction(&Func)) {
       HashedFuncs.push_back({FunctionComparator::functionHash(Func), &Func});
     }
@@ -726,6 +733,9 @@ bool SwiftMergeFunctions::runOnModule(Module &M) {
         return a.first < b.first;
       });
 
+  // `FuncEntryStorage`变量是一个用于存储函数入口信息的数据结构。
+  // 这个数据结构包含了函数的入口地址、函数大小、函数名称等信息。
+  // 这些信息可以帮助在函数合并过程中进行函数间的比较和匹配。
   std::vector<FunctionEntry> FuncEntryStorage;
   FuncEntryStorage.reserve(HashedFuncs.size());
 
@@ -747,6 +757,10 @@ bool SwiftMergeFunctions::runOnModule(Module &M) {
 
   do {
     std::vector<WeakTrackingVH> Worklist;
+    // 将Deferred向量中的元素与Worklist向量中的元素交换。
+    // 这个操作的目的是将推迟处理的函数推入到函数合并的工作队列中，
+    // 以便对这些函数进行进一步处理。
+    // 交换后，Deferred向量将为空，而Worklist向量将包含所有待处理的函数。
     Deferred.swap(Worklist);
 
     LLVM_DEBUG(dbgs() << "======\nbuild tree: worklist-size="
@@ -755,14 +769,30 @@ bool SwiftMergeFunctions::runOnModule(Module &M) {
 
     SmallVector<FunctionEntry *, 8> FuncsToMerge;
 
+    // 这段代码是函数合并算法的核心部分。它对待处理的函数进行迭代，
+    // 将每个函数添加到函数等价类中，并将其与其他函数进行比较以确定是否可以合并。
+    // 具体来说，它对每个函数执行以下操作：
+
+    // 将函数添加到函数等价类中。
+    // 如果该函数是新的等价类中的第一个函数，则将其标记为新的等价类，并将其添加到FnTree数据结构中。
+    // 如果该函数属于现有的等价类，则将其添加到该等价类中，并将其标记为需要合并的函数之一。
+    // 最后，如果某个等价类中的函数达到了两个或更多，则将其添加到FuncsToMerge向量中，以便进行进一步处理。
     // Insert all candidates into the Worklist.
     for (WeakTrackingVH &I : Worklist) {
       if (!I)
         continue;
       Function *F = cast<Function>(I);
       FunctionEntry *FE = getEntry(F);
+      // isInEquivalenceClass函数的作用是判断一个函数是否属于一个函数等价类。
+      // 在函数合并的过程中，如果两个函数可以被合并，则它们属于同一个函数等价类。
+      // 在这个函数中，通过比较两个函数的入口地址、大小、名称等信息，
+      // 来判断这两个函数是否属于同一个函数等价类。
+      // 如果两个函数属于同一个等价类，则它们可以被合并。
       assert(!isInEquivalenceClass(FE));
-
+      // FnTree是一个用于存储函数等价类的数据结构，它是一个以函数入口地址为键的哈希表。
+      // 在函数合并过程中，如果两个函数可以被合并，则它们属于同一个函数等价类。
+      // 在这个过程中，将会将这两个函数添加到FnTree中，并将它们关联到同一个函数等价类中。
+      // 这个数据结构可以帮助快速地查找函数等价类，并确保在函数合并过程中不会重复合并同一个等价类中的函数。
       std::pair<FnTreeType::iterator, bool> Result = FnTree.insert(FE);
 
       FE->TreeIter = Result.first;
